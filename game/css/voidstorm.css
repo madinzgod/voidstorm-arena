@@ -1,0 +1,57 @@
+/* VOIDSTORM page shell: a dark stage that centres the arena canvas and lets it
+   scale down on smaller windows while keeping its 16:10 shape. All in-game art
+   is drawn on the canvas itself; this sheet only frames it. */
+
+:root {
+  --void-deep: #030309;
+  --void-panel: #070714;
+  --neon-cyan: #29f4ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 700px at 50% 30%, #0b1030 0%, var(--void-deep) 62%)
+    var(--void-deep);
+  color: #bfefff;
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+
+#stage {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 12px;
+}
+
+#game-canvas {
+  width: min(1280px, 97vw);
+  height: auto;
+  aspect-ratio: 1280 / 800;
+  background: var(--void-panel);
+  border: 1px solid rgba(41, 244, 255, 0.35);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 42px rgba(41, 244, 255, 0.16),
+    0 0 120px rgba(150, 60, 255, 0.12);
+  cursor: crosshair;
+}
+
+#fallback-note {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(159, 231, 255, 0.5);
+}
