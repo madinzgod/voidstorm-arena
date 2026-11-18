@@ -15,6 +15,7 @@ export const PALETTE = {
   drifter: '#ff3d7e',
   weaver: '#ff9f2e',
   stinger: '#3dffc8',
+  lancer: '#4da3ff',
   bulwark: '#b46bff',
   warden: '#ff3860',
   wardenCore: '#ffd166',
@@ -52,6 +53,7 @@ export const ENEMY_TUNING = {
   drifter: { radius: 15, hull: 3, speed: 64, contactDamage: 10, score: 50, budgetCost: 1 },
   weaver: { radius: 13, hull: 4, speed: 92, contactDamage: 12, score: 80, budgetCost: 2 },
   stinger: { radius: 11, hull: 3, speed: 74, contactDamage: 14, score: 100, budgetCost: 2 },
+  lancer: { radius: 12, hull: 5, speed: 118, contactDamage: 10, score: 120, budgetCost: 2 },
   bulwark: { radius: 30, hull: 16, speed: 31, contactDamage: 20, score: 200, budgetCost: 4 },
   warden: { radius: 47, hull: 240, speed: 26, contactDamage: 26, score: 5000, budgetCost: 0 },
 };

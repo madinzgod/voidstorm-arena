@@ -4,6 +4,8 @@
 // screenshot always shows the whole loop at a glance.
 
 import { ARENA_WIDTH, ARENA_HEIGHT, PALETTE, PLAYER_TUNING, OVERDRIVE_SECONDS } from './config.js';
+import { drawEnemyPortrait } from './entities.js';
+import { upgradeCardRect } from './upgrades.js';
 
 const FONT_STACK = '"Segoe UI", system-ui, -apple-system, Arial, sans-serif';
 
@@ -12,7 +14,7 @@ export function drawHUD(ctx, state) {
   drawHullBar(ctx, player);
   drawScoreBlock(ctx, state);
   drawWaveBlock(ctx, state);
-  drawDashIndicator(ctx, player);
+  drawDashIndicator(ctx, state);
   if (player.overdriveTimer > 0) drawOverdriveBar(ctx, player);
   const warden = state.enemies.find((enemy) => enemy.type === 'warden');
   if (warden) drawBossBar(ctx, warden);
@@ -92,7 +94,8 @@ function drawWaveBlock(ctx, state) {
   ctx.fillText(remaining > 0 ? `${remaining} HOSTILES LEFT` : 'SECTOR CLEAR', ARENA_WIDTH / 2, 76);
 }
 
-function drawDashIndicator(ctx, player) {
+function drawDashIndicator(ctx, state) {
+  const player = state.player;
   const x = 22;
   const y = ARENA_HEIGHT - 30;
   ctx.textAlign = 'left';
@@ -100,7 +103,8 @@ function drawDashIndicator(ctx, player) {
   ctx.fillStyle = PALETTE.textDim;
   ctx.fillText('DASH [SHIFT]', x, y - 8);
   const ready = player.dashCooldown <= 0;
-  const fraction = ready ? 1 : 1 - player.dashCooldown / PLAYER_TUNING.dashCooldownSeconds;
+  const cooldownSpan = PLAYER_TUNING.dashCooldownSeconds * state.dashCooldownScale;
+  const fraction = ready ? 1 : 1 - player.dashCooldown / cooldownSpan;
   ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
   roundRect(ctx, x, y, 92, 8, 4);
   ctx.fill();
@@ -163,7 +167,7 @@ export function drawWaveBanner(ctx, state) {
 function waveSubtitle(wave) {
   if (wave === 1) return 'Drifters inbound. Hold the sector.';
   if (wave === 2) return 'Weavers on the wind.';
-  if (wave === 3) return 'Stingers are hunting.';
+  if (wave === 3) return 'Stingers lunge. Lancers snipe from range.';
   if (wave === 4) return 'Bulwarks ahead — they split when broken.';
   if (wave === 10) return 'The last gate. End this.';
   return 'Hold the sector.';
@@ -191,13 +195,13 @@ export function drawTitleScreen(ctx, state) {
   ctx.save();
   ctx.shadowColor = PALETTE.playerHull;
   ctx.shadowBlur = 34;
-  ctx.font = `900 92px ${FONT_STACK}`;
+  ctx.font = `900 88px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.textBright;
-  ctx.fillText('VOIDSTORM', ARENA_WIDTH / 2, 218);
+  ctx.fillText('VOIDSTORM', ARENA_WIDTH / 2, 188);
   ctx.restore();
   ctx.font = `700 19px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.playerHull;
-  ctx.fillText('N E O N   A R E N A   S U R V I V A L', ARENA_WIDTH / 2, 256);
+  ctx.fillText('N E O N   A R E N A   S U R V I V A L', ARENA_WIDTH / 2, 224);
 
   ctx.font = `600 17px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.textBright;
@@ -205,18 +209,19 @@ export function drawTitleScreen(ctx, state) {
     'Ten waves of voidspawn are coming for this sector. You are its only pilot.',
     'Survive every wave, break the VOID WARDEN at waves 5 and 10, and clear the arena.',
   ];
-  lines.forEach((line, i) => ctx.fillText(line, ARENA_WIDTH / 2, 316 + i * 25));
+  lines.forEach((line, i) => ctx.fillText(line, ARENA_WIDTH / 2, 268 + i * 24));
 
   const controls = [
     ['WASD / ARROWS', 'fly the ship'],
     ['MOUSE', 'aim — hold click or SPACE to fire'],
     ['SHIFT / RIGHT CLICK', 'dash (briefly untouchable)'],
+    ['AFTER EACH WAVE', 'pick 1 of 3 upgrades — they stack all run'],
     ['P', 'pause'],
     ['M', 'mute'],
   ];
   ctx.font = `600 15px ${FONT_STACK}`;
   controls.forEach(([keys, what], i) => {
-    const y = 402 + i * 27;
+    const y = 330 + i * 25;
     ctx.textAlign = 'right';
     ctx.fillStyle = PALETTE.overdrive;
     ctx.fillText(keys, ARENA_WIDTH / 2 - 14, y);
@@ -229,12 +234,111 @@ export function drawTitleScreen(ctx, state) {
   const pulse = 0.65 + Math.sin(state.time * 3.4) * 0.35;
   ctx.font = `800 23px ${FONT_STACK}`;
   ctx.fillStyle = `rgba(234, 252, 255, ${pulse})`;
-  ctx.fillText('CLICK OR PRESS ENTER TO LAUNCH', ARENA_WIDTH / 2, 596);
+  ctx.fillText('CLICK OR PRESS ENTER TO LAUNCH', ARENA_WIDTH / 2, 534);
 
   ctx.font = `600 14px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.textDim;
-  ctx.fillText(`BEST SCORE  ${formatScore(state.best)}`, ARENA_WIDTH / 2, 640);
-  ctx.fillText('Grab green crosses to repair · gold bolts for OVERDRIVE triple fire', ARENA_WIDTH / 2, 668);
+  ctx.fillText(`BEST SCORE  ${formatScore(state.best)}`, ARENA_WIDTH / 2, 570);
+  ctx.fillText('Grab green crosses to repair · gold bolts for OVERDRIVE triple fire', ARENA_WIDTH / 2, 594);
+
+  drawEnemyRoster(ctx);
+}
+
+const ROSTER = [
+  { type: 'drifter', name: 'DRIFTER', trait: 'relentless chaser' },
+  { type: 'weaver', name: 'WEAVER', trait: 'zigzag dodger' },
+  { type: 'stinger', name: 'STINGER', trait: 'lunging hunter' },
+  { type: 'lancer', name: 'LANCER', trait: 'long-range sniper' },
+  { type: 'bulwark', name: 'BULWARK', trait: 'splits when broken' },
+  { type: 'warden', name: 'WARDEN', trait: 'the boss, waves 5 & 10' },
+];
+
+function drawEnemyRoster(ctx) {
+  ctx.textAlign = 'center';
+  ctx.font = `700 12px ${FONT_STACK}`;
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.fillText('—  K N O W   Y O U R   E N E M Y  —', ARENA_WIDTH / 2, 644);
+  const spacing = 172;
+  const firstX = ARENA_WIDTH / 2 - ((ROSTER.length - 1) / 2) * spacing;
+  ROSTER.forEach((entry, i) => {
+    const x = firstX + i * spacing;
+    drawEnemyPortrait(ctx, entry.type, x, 682, entry.type === 'warden' ? 21 : 15);
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillStyle = PALETTE[entry.type];
+    ctx.fillText(entry.name, x, 722);
+    ctx.font = `600 11px ${FONT_STACK}`;
+    ctx.fillStyle = PALETTE.textDim;
+    ctx.fillText(entry.trait, x, 740);
+  });
+}
+
+export function drawUpgradeScreen(ctx, state) {
+  drawDim(ctx, 0.58);
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.shadowColor = '#4dff88';
+  ctx.shadowBlur = 22;
+  ctx.font = `800 40px ${FONT_STACK}`;
+  ctx.fillStyle = '#4dff88';
+  ctx.fillText('SECTOR UPGRADE', ARENA_WIDTH / 2, 218);
+  ctx.restore();
+  ctx.font = `600 17px ${FONT_STACK}`;
+  ctx.fillStyle = PALETTE.textBright;
+  ctx.fillText(`Wave ${state.wave} cleared. Choose one refit — every pick stacks for the whole run.`, ARENA_WIDTH / 2, 252);
+  ctx.font = `600 14px ${FONT_STACK}`;
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.fillText(`Fitted so far: ${state.upgradesTaken.length > 0 ? state.upgradesTaken.join(' · ') : 'none yet'}`, ARENA_WIDTH / 2, 278);
+
+  (state.upgradeChoices || []).forEach((upgrade, i) => {
+    const rect = upgradeCardRect(i);
+    const hovered = state.upgradeHover === i;
+    ctx.save();
+    if (hovered) {
+      ctx.shadowColor = upgrade.color;
+      ctx.shadowBlur = 24;
+    }
+    ctx.fillStyle = hovered ? 'rgba(16, 22, 44, 0.97)' : 'rgba(8, 10, 26, 0.94)';
+    ctx.strokeStyle = upgrade.color;
+    ctx.lineWidth = hovered ? 3 : 2;
+    roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = 'center';
+    ctx.font = `800 15px ${FONT_STACK}`;
+    ctx.fillStyle = upgrade.color;
+    ctx.fillText(`[ ${i + 1} ]`, rect.x + rect.width / 2, rect.y + 34);
+    ctx.font = `800 21px ${FONT_STACK}`;
+    ctx.fillStyle = PALETTE.textBright;
+    ctx.fillText(upgrade.name, rect.x + rect.width / 2, rect.y + 66);
+    ctx.font = `600 14.5px ${FONT_STACK}`;
+    ctx.fillStyle = PALETTE.textDim;
+    wrapText(ctx, upgrade.blurb, rect.width - 36).forEach((line, lineIndex) => {
+      ctx.fillText(line, rect.x + rect.width / 2, rect.y + 98 + lineIndex * 21);
+    });
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillStyle = upgrade.color;
+    ctx.fillText(`PRESS ${i + 1} OR CLICK`, rect.x + rect.width / 2, rect.y + rect.height - 16);
+  });
+  ctx.textAlign = 'center';
+}
+
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const trial = line === '' ? word : `${line} ${word}`;
+    if (ctx.measureText(trial).width > maxWidth && line !== '') {
+      lines.push(line);
+      line = word;
+    } else {
+      line = trial;
+    }
+  }
+  if (line !== '') lines.push(line);
+  return lines;
 }
 
 export function drawPauseOverlay(ctx, state) {
@@ -265,7 +369,7 @@ export function drawGameOverScreen(ctx, state) {
   const pulse = 0.65 + Math.sin(state.time * 3.4) * 0.35;
   ctx.font = `800 21px ${FONT_STACK}`;
   ctx.fillStyle = `rgba(234, 252, 255, ${pulse})`;
-  ctx.fillText('PRESS ENTER TO FLY AGAIN', ARENA_WIDTH / 2, 560);
+  ctx.fillText('PRESS ENTER TO FLY AGAIN', ARENA_WIDTH / 2, 612);
 }
 
 export function drawVictoryScreen(ctx, state) {
@@ -284,10 +388,10 @@ export function drawVictoryScreen(ctx, state) {
   drawResultsBlock(ctx, state, 346);
   ctx.font = `800 20px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.textBright;
-  ctx.fillText('ENTER — KEEP FLYING (ENDLESS)', ARENA_WIDTH / 2, 548);
+  ctx.fillText('ENTER — KEEP FLYING (ENDLESS)', ARENA_WIDTH / 2, 592);
   ctx.font = `600 15px ${FONT_STACK}`;
   ctx.fillStyle = PALETTE.textDim;
-  ctx.fillText('R — start a fresh run', ARENA_WIDTH / 2, 578);
+  ctx.fillText('R — start a fresh run', ARENA_WIDTH / 2, 622);
 }
 
 function drawResultsBlock(ctx, state, topY) {
@@ -297,10 +401,11 @@ function drawResultsBlock(ctx, state, topY) {
     ['WAVE REACHED', String(state.wave)],
     ['KILLS', String(state.stats.kills)],
     ['ACCURACY', state.stats.shotsFired > 0 ? `${Math.round((state.stats.hits / state.stats.shotsFired) * 100)}%` : '—'],
+    ['UPGRADES FITTED', String(state.upgradesTaken.length)],
   ];
   ctx.font = `600 16px ${FONT_STACK}`;
   rows.forEach(([label, value], i) => {
-    const y = topY + i * 30;
+    const y = topY + i * 28;
     ctx.textAlign = 'right';
     ctx.fillStyle = PALETTE.textDim;
     ctx.fillText(label, ARENA_WIDTH / 2 - 16, y);
@@ -309,10 +414,17 @@ function drawResultsBlock(ctx, state, topY) {
     ctx.fillText(value, ARENA_WIDTH / 2 + 16, y);
   });
   ctx.textAlign = 'center';
+  let cursorY = topY + rows.length * 28;
+  if (state.upgradesTaken.length > 0) {
+    ctx.font = `600 13px ${FONT_STACK}`;
+    ctx.fillStyle = PALETTE.textDim;
+    ctx.fillText(state.upgradesTaken.join(' · '), ARENA_WIDTH / 2, cursorY + 4);
+    cursorY += 26;
+  }
   if (state.newBest) {
     ctx.font = `800 17px ${FONT_STACK}`;
     ctx.fillStyle = PALETTE.overdrive;
-    ctx.fillText('★ NEW BEST SCORE ★', ARENA_WIDTH / 2, topY + rows.length * 30 + 12);
+    ctx.fillText('★ NEW BEST SCORE ★', ARENA_WIDTH / 2, cursorY + 12);
   }
 }
 

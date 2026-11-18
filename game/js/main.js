@@ -1,8 +1,9 @@
 // VOIDSTORM — entry point and conductor. Owns the game state and its modes
 // (title, playing, paused, game over, victory), the fixed-feel frame loop,
-// wave flow, combo scoring, the pilot's death and restart, plus a deterministic
-// screenshot mode (?shot=title|action|boss|over&seed=N) the maker uses to pose
-// real scenes for the entry's screenshots, flown by a small autopilot.
+// wave flow, the between-wave upgrade draft, combo scoring, the pilot's death
+// and restart, plus a deterministic screenshot mode
+// (?shot=title|boss|upgrade|over&seed=N) the maker uses to pose real scenes
+// for the entry's screenshots, flown by a small autopilot.
 
 import { ARENA_WIDTH, ARENA_HEIGHT, COMBO_WINDOW_SECONDS, COMBO_KILLS_PER_STEP, COMBO_MAX_MULTIPLIER, FINAL_WAVE, WAVE_BONUS_PER_WAVE, wardenHullForWave } from './config.js';
 import { Input } from './input.js';
@@ -11,10 +12,11 @@ import { Starfield, Effects } from './effects.js';
 import {
   createPlayer, resetPlayer, updatePlayer, updateBullets, updateEnemies,
   collideBulletsWithEnemies, collideEnemiesWithPlayer, updatePickups,
-  drawPlayer, drawBullets, drawEnemies, drawPickups, spawnEnemy,
+  drawPlayer, drawBullets, drawEnemies, drawPickups, spawnEnemy, spawnPickup,
 } from './entities.js';
 import { buildWaveQueue, WaveSpawner, isBossWave } from './waves.js';
-import { drawHUD, drawWaveBanner, drawTitleScreen, drawPauseOverlay, drawGameOverScreen, drawVictoryScreen } from './hud.js';
+import { rollUpgradeChoices, applyUpgrade, upgradeCardRect } from './upgrades.js';
+import { drawHUD, drawWaveBanner, drawTitleScreen, drawPauseOverlay, drawGameOverScreen, drawVictoryScreen, drawUpgradeScreen } from './hud.js';
 
 const BEST_SCORE_KEY = 'voidstorm-best-score';
 
@@ -71,6 +73,15 @@ function createGameState(canvas, rng) {
     wavePhase: 'intro',
     phaseTimer: 0,
     spawner: null,
+    fireIntervalScale: 1,
+    cannonStreams: 1,
+    bulletDamage: 1,
+    speedScale: 1,
+    dashCooldownScale: 1,
+    magnetScale: 1,
+    upgradesTaken: [],
+    upgradeChoices: null,
+    upgradeHover: -1,
     wardenHull: 0,
     bossDefeated: false,
     lastWaveBonus: 0,
@@ -101,6 +112,15 @@ function startRun(state) {
   state.endless = false;
   state.deathTimer = 0;
   state.hurtFlashTimer = 0;
+  state.fireIntervalScale = 1;
+  state.cannonStreams = 1;
+  state.bulletDamage = 1;
+  state.speedScale = 1;
+  state.dashCooldownScale = 1;
+  state.magnetScale = 1;
+  state.upgradesTaken = [];
+  state.upgradeChoices = null;
+  state.upgradeHover = -1;
   resetPlayer(state.player);
   state.mode = 'playing';
   state.modeTimer = 0;
@@ -128,8 +148,39 @@ function waveCleared(state) {
     finishRun(state, 'victory');
     return;
   }
-  state.wavePhase = 'clear';
-  state.phaseTimer = 2.2;
+  if (state.shotMode) {
+    // Posed scenes keep the old flow: no draft interrupts a screenshot.
+    state.wavePhase = 'clear';
+    state.phaseTimer = 2.2;
+    return;
+  }
+  state.upgradeChoices = rollUpgradeChoices(state);
+  state.upgradeHover = -1;
+  state.wavePhase = 'upgrade';
+}
+
+function updateUpgradeChoice(state) {
+  const input = state.input;
+  state.upgradeHover = -1;
+  (state.upgradeChoices || []).forEach((choice, index) => {
+    const rect = upgradeCardRect(index);
+    if (input.mouseX >= rect.x && input.mouseX <= rect.x + rect.width &&
+        input.mouseY >= rect.y && input.mouseY <= rect.y + rect.height) {
+      state.upgradeHover = index;
+    }
+  });
+  let picked = -1;
+  if (input.wasPressed('Digit1')) picked = 0;
+  else if (input.wasPressed('Digit2')) picked = 1;
+  else if (input.wasPressed('Digit3')) picked = 2;
+  else if (input.clicked && state.upgradeHover >= 0) picked = state.upgradeHover;
+  if (picked >= 0 && state.upgradeChoices && state.upgradeChoices[picked]) {
+    applyUpgrade(state, state.upgradeChoices[picked]);
+    state.upgradeChoices = null;
+    state.wavePhase = 'clear';
+    state.phaseTimer = 1.4;
+    state.sound.playPickup();
+  }
 }
 
 function finishRun(state, ending) {
@@ -202,6 +253,8 @@ function updatePlaying(state, dt) {
     COMBO_MAX_MULTIPLIER - 1,
     Math.floor(state.comboKills / COMBO_KILLS_PER_STEP),
   );
+
+  if (state.wavePhase === 'upgrade') updateUpgradeChoice(state);
 
   if (state.wavePhase === 'intro') {
     state.phaseTimer -= dt;
@@ -300,6 +353,7 @@ function render(state) {
   } else {
     drawHUD(ctx, state);
     if (state.mode === 'playing') drawWaveBanner(ctx, state);
+    if (state.mode === 'playing' && state.wavePhase === 'upgrade') drawUpgradeScreen(ctx, state);
     if (state.mode === 'paused') drawPauseOverlay(ctx, state);
     if (state.mode === 'gameover') drawGameOverScreen(ctx, state);
     if (state.mode === 'victory') drawVictoryScreen(ctx, state);
@@ -307,7 +361,7 @@ function render(state) {
 }
 
 function spawnDecorativeFleet(state) {
-  const kinds = ['drifter', 'weaver', 'stinger', 'bulwark', 'drifter', 'weaver'];
+  const kinds = ['drifter', 'weaver', 'stinger', 'lancer', 'bulwark', 'drifter'];
   kinds.forEach((type, i) => {
     const enemy = spawnEnemy(state, type, 0, 0);
     enemy.materializeTimer = 0;
@@ -328,6 +382,7 @@ function setupShotScene(state, shot, seed) {
     state.score = 18420;
     state.wave = 7;
     state.stats = { kills: 86, shotsFired: 640, hits: 402 };
+    state.upgradesTaken = ['Rapid Cycler', 'Twin Cannons', 'Void Plating'];
     state.best = Math.max(state.best, 21300);
     state.newBest = false;
     state.player.dead = true;
@@ -335,6 +390,26 @@ function setupShotScene(state, shot, seed) {
     state.effects.spawnExplosion(state.player.x, state.player.y, '#29f4ff', 2.4);
     finishRun(state, 'gameover');
     state.modeTimer = 5;
+    return;
+  }
+  if (shot === 'upgrade') {
+    startRun(state);
+    state.wave = 4;
+    state.score = 6850;
+    state.stats = { kills: 41, shotsFired: 388, hits: 246 };
+    state.upgradesTaken = ['Rapid Cycler'];
+    state.fireIntervalScale = 0.75;
+    state.enemies.length = 0;
+    state.hostileBullets.length = 0;
+    if (state.spawner) state.spawner.queue.length = 0;
+    state.player.x = ARENA_WIDTH / 2;
+    state.player.y = 648;
+    state.player.hull = 82;
+    spawnPickup(state, 268, 268, 'repair');
+    spawnPickup(state, 1012, 238, 'overdrive');
+    state.upgradeChoices = rollUpgradeChoices(state);
+    state.wavePhase = 'upgrade';
+    state.sound.stopMusic();
     return;
   }
   state.autopilot = true;

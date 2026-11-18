@@ -1,5 +1,5 @@
 // Everything that flies in the arena: the pilot's ship, both sides' bullets,
-// the five hostile types (including the VOID WARDEN boss and its bullet
+// the six hostile types (including the VOID WARDEN boss and its bullet
 // patterns) and the pickups they drop. Factories, per-frame updates, contact
 // and bullet collisions, and the canvas drawing for each kind.
 
@@ -35,13 +35,13 @@ export function resetPlayer(player) {
   Object.assign(player, fresh);
 }
 
-export function spawnPlayerBullet(state, x, y, angle, overdrive) {
+export function spawnPlayerBullet(state, x, y, angle, overdrive, damage = PLAYER_TUNING.bulletDamage) {
   state.bullets.push({
     x, y,
     vx: Math.cos(angle) * PLAYER_TUNING.bulletSpeed,
     vy: Math.sin(angle) * PLAYER_TUNING.bulletSpeed,
     radius: 3.2,
-    damage: PLAYER_TUNING.bulletDamage,
+    damage,
     life: 0.95,
     overdrive,
   });
@@ -66,15 +66,16 @@ export function updatePlayer(state, dt) {
 
   const move = state.autopilot ? state.autopilotMove : input.movementVector();
   player.thrusting = move.x !== 0 || move.y !== 0;
-  player.vx += move.x * PLAYER_TUNING.thrust * dt;
-  player.vy += move.y * PLAYER_TUNING.thrust * dt;
+  player.vx += move.x * PLAYER_TUNING.thrust * state.speedScale * dt;
+  player.vy += move.y * PLAYER_TUNING.thrust * state.speedScale * dt;
   const dampingFactor = Math.max(0, 1 - PLAYER_TUNING.damping * dt);
   player.vx *= dampingFactor;
   player.vy *= dampingFactor;
   const speed = Math.hypot(player.vx, player.vy);
-  if (speed > PLAYER_TUNING.maxSpeed) {
-    player.vx = (player.vx / speed) * PLAYER_TUNING.maxSpeed;
-    player.vy = (player.vy / speed) * PLAYER_TUNING.maxSpeed;
+  const maxSpeed = PLAYER_TUNING.maxSpeed * state.speedScale;
+  if (speed > maxSpeed) {
+    player.vx = (player.vx / speed) * maxSpeed;
+    player.vy = (player.vy / speed) * maxSpeed;
   }
 
   const aimX = state.autopilot ? state.autopilotAim.x : input.mouseX;
@@ -93,7 +94,7 @@ export function updatePlayer(state, dt) {
     player.vx = Math.cos(dashAngle) * PLAYER_TUNING.dashSpeed;
     player.vy = Math.sin(dashAngle) * PLAYER_TUNING.dashSpeed;
     player.dashTimer = PLAYER_TUNING.dashSeconds;
-    player.dashCooldown = PLAYER_TUNING.dashCooldownSeconds;
+    player.dashCooldown = PLAYER_TUNING.dashCooldownSeconds * state.dashCooldownScale;
     player.invulnerableTimer = Math.max(player.invulnerableTimer, PLAYER_TUNING.dashSeconds + 0.08);
     state.sound.playDash();
   }
@@ -109,7 +110,8 @@ export function updatePlayer(state, dt) {
   if (wantsFire && player.fireTimer <= 0) {
     firePlayerWeapon(state);
     const baseInterval = PLAYER_TUNING.fireIntervalSeconds;
-    player.fireTimer = player.overdriveTimer > 0 ? baseInterval / OVERDRIVE_FIRE_DIVISOR : baseInterval;
+    const cadence = player.overdriveTimer > 0 ? baseInterval / OVERDRIVE_FIRE_DIVISOR : baseInterval;
+    player.fireTimer = cadence * state.fireIntervalScale;
   }
 }
 
@@ -118,13 +120,20 @@ function firePlayerWeapon(state) {
   const noseX = player.x + Math.cos(player.angle) * (player.radius + 6);
   const noseY = player.y + Math.sin(player.angle) * (player.radius + 6);
   const overdrive = player.overdriveTimer > 0;
-  spawnPlayerBullet(state, noseX, noseY, player.angle, overdrive);
-  if (overdrive) {
-    spawnPlayerBullet(state, noseX, noseY, player.angle - 0.11, overdrive);
-    spawnPlayerBullet(state, noseX, noseY, player.angle + 0.11, overdrive);
+  const streams = Math.max(1, state.cannonStreams || 1);
+  let fired = 0;
+  for (let s = 0; s < streams; s++) {
+    const streamAngle = player.angle + (s - (streams - 1) / 2) * 0.085;
+    spawnPlayerBullet(state, noseX, noseY, streamAngle, overdrive, state.bulletDamage);
+    fired += 1;
+    if (overdrive) {
+      spawnPlayerBullet(state, noseX, noseY, streamAngle - 0.11, overdrive, state.bulletDamage);
+      spawnPlayerBullet(state, noseX, noseY, streamAngle + 0.11, overdrive, state.bulletDamage);
+      fired += 2;
+    }
   }
   state.effects.spawnMuzzleFlash(noseX, noseY, player.angle, overdrive ? PALETTE.overdriveBullet : PALETTE.bullet);
-  state.stats.shotsFired += overdrive ? 3 : 1;
+  state.stats.shotsFired += fired;
   state.sound.playShoot();
 }
 
@@ -165,6 +174,8 @@ export function spawnEnemy(state, type, x, y) {
     fireTimer: 1.2 + state.rng() * 0.8,
     ringTimer: 2.4,
     minionTimer: 5,
+    spiralTimer: 0,
+    spiralAngle: state.rng() * TAU,
     ringOffset: state.rng() * TAU,
     contactCooldown: 0,
   };
@@ -210,6 +221,9 @@ export function updateEnemies(state, dt) {
       case 'stinger':
         updateStingerMovement(enemy, tuning, towardX, towardY, distance, dt);
         break;
+      case 'lancer':
+        updateLancerBehaviour(state, enemy, tuning, towardX, towardY, distance, dt);
+        break;
       case 'bulwark':
         enemy.vx = towardX * tuning.speed;
         enemy.vy = towardY * tuning.speed;
@@ -219,10 +233,9 @@ export function updateEnemies(state, dt) {
         updateWardenBehaviour(state, enemy, dt, distance);
         break;
     }
-    if (enemy.type !== 'warden' && enemy.type !== 'stinger') {
-      enemy.x += enemy.vx * dt;
-      enemy.y += enemy.vy * dt;
-    } else if (enemy.type === 'stinger') {
+    // The warden and the lancer steer themselves inside their behaviours;
+    // every other hostile simply follows the velocity its behaviour set.
+    if (enemy.type !== 'warden' && enemy.type !== 'lancer') {
       enemy.x += enemy.vx * dt;
       enemy.y += enemy.vy * dt;
     }
@@ -258,6 +271,27 @@ function updateStingerMovement(enemy, tuning, towardX, towardY, distance, dt) {
       enemy.mode = 'stalk';
       enemy.modeTimer = 0.9 + Math.random() * 0.7;
     }
+  }
+}
+
+function updateLancerBehaviour(state, enemy, tuning, towardX, towardY, distance, dt) {
+  // The lancer is the roster's only gunner besides the Warden: it holds a
+  // sniping stand-off distance, strafes sideways while it lines up, and
+  // fires single aimed bolts the pilot has to dodge or dash through.
+  const standOff = 400;
+  const radial = clamp((distance - standOff) / 160, -1, 1);
+  const strafeDirection = enemy.phase > Math.PI ? 1 : -1;
+  const weave = Math.sin(enemy.age * 1.7 + enemy.phase) * 0.45;
+  enemy.vx = (towardX * radial + -towardY * strafeDirection * (0.55 + weave)) * tuning.speed;
+  enemy.vy = (towardY * radial + towardX * strafeDirection * (0.55 + weave)) * tuning.speed;
+  enemy.x += enemy.vx * dt;
+  enemy.y += enemy.vy * dt;
+  enemy.angle = Math.atan2(towardY, towardX);
+  enemy.fireTimer -= dt;
+  if (enemy.fireTimer <= 0 && distance < 640) {
+    enemy.fireTimer = 2.3 + state.rng() * 0.5;
+    spawnHostileBullet(state, enemy.x, enemy.y, Math.atan2(towardY, towardX), 305, 10);
+    state.sound.playHostileShot();
   }
 }
 
@@ -301,6 +335,16 @@ function updateWardenBehaviour(state, enemy, dt, distanceToPlayer) {
       enemy.minionTimer = 6;
       spawnEnemy(state, 'drifter', enemy.x - 60, enemy.y);
       spawnEnemy(state, 'drifter', enemy.x + 60, enemy.y);
+    }
+    // Final-phase signature: a twin-arm spiral barrage that sweeps the
+    // arena and forces the pilot to keep moving through its gaps.
+    enemy.spiralTimer -= dt;
+    if (enemy.spiralTimer <= 0) {
+      enemy.spiralTimer = 0.11;
+      enemy.spiralAngle += 0.42;
+      for (const arm of [0, Math.PI]) {
+        spawnHostileBullet(state, enemy.x, enemy.y, enemy.spiralAngle + arm, 152, 10);
+      }
     }
   }
 }
@@ -442,7 +486,7 @@ export function updatePickups(state, dt) {
     const dx = player.x - pickup.x;
     const dy = player.y - pickup.y;
     const distance = Math.hypot(dx, dy);
-    if (!player.dead && distance < 110) {
+    if (!player.dead && distance < 110 * (state.magnetScale || 1)) {
       pickup.vx += (dx / Math.max(1, distance)) * 620 * dt;
       pickup.vy += (dy / Math.max(1, distance)) * 620 * dt;
     }
@@ -638,6 +682,12 @@ function drawEnemyShape(ctx, enemy) {
       ctx.lineTo(-r * 0.55, 0);
       ctx.lineTo(-r, -r * 0.55);
       break;
+    case 'lancer':
+      ctx.moveTo(r * 1.35, 0);
+      ctx.lineTo(-r * 0.7, r * 0.62);
+      ctx.lineTo(-r * 0.35, 0);
+      ctx.lineTo(-r * 0.7, -r * 0.62);
+      break;
     case 'bulwark':
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * TAU;
@@ -661,7 +711,7 @@ function drawEnemyCore(ctx, enemy) {
   const pulse = 0.75 + Math.sin(enemy.age * 5 + enemy.phase) * 0.25;
   ctx.fillStyle = PALETTE[enemy.type];
   ctx.globalAlpha = pulse;
-  const coreRadius = enemy.type === 'warden' ? 13 : enemy.type === 'bulwark' ? 8 : 4.2;
+  const coreRadius = enemy.type === 'warden' ? 13 : enemy.type === 'bulwark' ? 8 : enemy.type === 'lancer' ? 5 : 4.2;
   ctx.beginPath();
   ctx.arc(0, 0, coreRadius, 0, TAU);
   ctx.fill();
@@ -690,6 +740,28 @@ function drawMiniHealthBar(ctx, enemy) {
   ctx.fillRect(enemy.x - width / 2, enemy.y - enemy.radius - 11, width, 3.5);
   ctx.fillStyle = PALETTE[enemy.type];
   ctx.fillRect(enemy.x - width / 2, enemy.y - enemy.radius - 11, width * fraction, 3.5);
+}
+
+// A still portrait of one hostile, drawn with the very shape and core the
+// arena uses, so the title screen's roster shows the real cast.
+export function drawEnemyPortrait(ctx, type, x, y, radius) {
+  const portrait = {
+    type, radius, angle: -0.5, age: 2.2, phase: 1.1, flashTimer: 0, mode: 'stalk',
+  };
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(portrait.angle);
+  ctx.shadowColor = PALETTE[type];
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = 'rgba(10, 8, 24, 0.92)';
+  ctx.strokeStyle = PALETTE[type];
+  ctx.lineWidth = 2;
+  drawEnemyShape(ctx, portrait);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  drawEnemyCore(ctx, portrait);
+  ctx.restore();
 }
 
 function clamp(value, min, max) {

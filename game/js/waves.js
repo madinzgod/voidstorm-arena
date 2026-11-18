@@ -9,6 +9,7 @@ const UNLOCK_ORDER = [
   { type: 'drifter', fromWave: 1, weight: 10 },
   { type: 'weaver', fromWave: 2, weight: 6 },
   { type: 'stinger', fromWave: 3, weight: 5 },
+  { type: 'lancer', fromWave: 3, weight: 4 },
   { type: 'bulwark', fromWave: 4, weight: 3 },
 ];
 
@@ -20,7 +21,11 @@ export function buildWaveQueue(rng, waveNumber) {
   if (isBossWave(waveNumber)) {
     const queue = ['warden'];
     const escorts = Math.min(6, 2 + Math.floor(waveNumber / 5));
-    for (let i = 0; i < escorts; i++) queue.push(i % 2 === 0 ? 'drifter' : 'weaver');
+    for (let i = 0; i < escorts; i++) {
+      // The final gate's escort trickle adds a lancer to keep its fire on
+      // the pilot while the Warden closes in.
+      queue.push(waveNumber >= 10 ? ['drifter', 'weaver', 'lancer'][i % 3] : (i % 2 === 0 ? 'drifter' : 'weaver'));
+    }
     return queue;
   }
   let budget = waveSpawnBudget(waveNumber);

@@ -78,6 +78,10 @@ export class SoundEngine {
     this.tone({ frequency: 300 + Math.random() * 60, endFrequency: 180, type: 'triangle', seconds: 0.05, volume: 0.08 });
   }
 
+  playHostileShot() {
+    this.tone({ frequency: 520, endFrequency: 230, type: 'sawtooth', seconds: 0.09, volume: 0.05 });
+  }
+
   playExplosion(big = false) {
     this.noiseBurst({ seconds: big ? 0.55 : 0.28, volume: big ? 0.42 : 0.24, filterFrequency: big ? 700 : 1100 });
     this.tone({ frequency: big ? 130 : 170, endFrequency: 38, type: 'sine', seconds: big ? 0.5 : 0.3, volume: 0.3 });

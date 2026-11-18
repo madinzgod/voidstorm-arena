@@ -7,11 +7,15 @@
 An original neon arena survival shooter, built from scratch for make.fun's
 [best-game-01](https://make.fun/bounty/best-game-01) — "Make the best game".
 Ten waves of voidspawn swarm a lone pilot: drifters that hunt in packs,
-weavers that strafe, stingers that telegraph and lunge, bulwarks that split
-when broken, and the VOID WARDEN boss at waves 5 and 10 with aimed bursts
-and radial bullet rings. Clear wave 10 to win the arena, then keep flying
-in endless mode. Grab repair crosses to mend the hull and gold bolts for
-OVERDRIVE triple fire; chain kills to raise the combo multiplier to ×8.
+weavers that strafe, stingers that telegraph and lunge, lancers that hold
+range and snipe, bulwarks that split when broken, and the VOID WARDEN boss
+at waves 5 and 10 with aimed bursts, radial bullet rings and a final-phase
+spiral barrage. Clear wave 10 to win the arena, then keep flying in endless
+mode. After every wave, draft 1 of 3 sector upgrades — faster fire, twin
+cannons, heavy rounds, ion thrusters, void plating, a salvage magnet — and
+stack them into a different build each run. Grab repair crosses to mend the
+hull and gold bolts for OVERDRIVE triple fire; chain kills to raise the
+combo multiplier to ×8.
 
 Pure static files — vanilla JavaScript and Canvas 2D, no libraries, no
 build step, no network. All sound is synthesised live with WebAudio.
@@ -27,18 +31,20 @@ python3 -m http.server 8080 --directory game
 ```
 
 **Controls** — WASD / arrows to fly · mouse to aim, hold click or SPACE to
-fire · SHIFT or right-click to dash (briefly untouchable) · P pause · M mute.
+fire · SHIFT or right-click to dash (briefly untouchable) · 1 / 2 / 3 or
+click to pick an upgrade between waves · P pause · M mute.
 
 ## Layout
 
 - `game/index.html` — the page; loads `game/js/main.js` as a module.
 - `game/js/main.js` — game state machine, frame loop, wave flow, autopilot screenshot scenes.
 - `game/js/config.js` — every tuning number: ship, weapons, hostiles, wave budgets.
-- `game/js/entities.js` — the ship, bullets, all five hostile types, the Warden's patterns, pickups.
+- `game/js/entities.js` — the ship, bullets, all six hostile types, the Warden's patterns, pickups.
+- `game/js/upgrades.js` — the between-wave upgrade draft: the catalogue, the draw, the card layout.
 - `game/js/waves.js` — wave compositions and the edge spawner.
 - `game/js/effects.js` — particles, shockwaves, floating score text, screen shake, starfield.
 - `game/js/audio.js` — the WebAudio synth: effects and the music loop, no audio files.
-- `game/js/hud.js` — HUD, title, pause, wave banners, game-over and victory screens.
+- `game/js/hud.js` — HUD, title with the enemy roster, upgrade draft, pause, wave banners, game-over and victory screens.
 - `game/js/input.js` — polled keyboard and mouse state.
 - `main.ts` — the hand-in program (Node 22, standard library only): copies
   `game/` and `screenshots/` to the output directory and writes
